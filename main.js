@@ -8,14 +8,12 @@ app.use(bodyParser.urlencoded({ extended: false }));
 const auth = require('./lib/auth');
 const session = require('express-session');
 const FileStore = require('session-file-store')(session);
+const db = require('./lib/db');
 
-
-const low = require('lowdb');
-const FileSync = require('lowdb/adapters/FileSync');
-const adapter = new FileSync('db.json');
-const db = low(adapter);
-
-db.defaults({users:[]}).write();
+app.use('*',(request,response,next)=>{
+    request.list = db.get('topics').value();
+    next();
+});
 
 app.use(session({
     store: new FileStore(),

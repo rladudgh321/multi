@@ -4,6 +4,9 @@ const qs = require('querystring');
 const fs = require('fs');
 const path = require('path');
 const template = require('../lib/template');
+const shortid = require('shortid');
+const db = require('../lib/db');
+const bcrypt =require('bcrypt');
 
 module.exports = function(passport){
 
@@ -20,10 +23,9 @@ module.exports = function(passport){
             feedback = fmsg.error[0];
         }
         console.log("feedback",feedback);
-        fs.readdir('./data',(err,filelist)=>{
             const title = 'Log-in';
             const description = '';
-            const list = template.list(filelist);
+            const list = template.list(request.list);
             const html = template.html(title,description,list,
             ` <div style="color:red;">${feedback}</div>
             <form action="/auth/login" method="post">
@@ -34,7 +36,6 @@ module.exports = function(passport){
             );
             response.writeHead(200);
             response.end(html);
-        });
     });
 
     router.post('/login', passport.authenticate('local', {
@@ -61,102 +62,66 @@ module.exports = function(passport){
     */
 
     router.get('/logout', (request,response)=>{
-        request.session.destroy((err)=>{
+        request.logout(err=>{
+            if(err){
+                return next(err);
+            }
             response.redirect('/');
-        })
+        });
     });
 
-    /*
-    router.get('/create', (request,response)=>{
-        fs.readdir('./data',(err,filelist)=>{
-            const title = 'Create';
+    router.get('/register', (request,response)=>{
+        const fmsg = request.flash();
+        let feedback = '';
+        if(fmsg.error){
+            feedback = fmsg.error[0];
+        }
+        console.log("feedback",feedback);
+            const title = 'Register';
             const description = '';
-            const list = template.list(filelist);
+            const list = template.list(request.list);
             const html = template.html(title,description,list,
-            `<form action="/topic/create" method="post">
-                <p><input type="text" name="title" placeholder="title"></p>
-                <p><textarea name="description" placeholder="description"></textarea></p>
-                <p><input type="submit" value="create"></p>
+            ` <div style="color:red;">${feedback}</div>
+            <form action="/auth/register" method="post">
+                <p><input type="text" name="email" placeholder="email"></p>
+                <p><input type="password" name="pwd" placeholder="password"></p>
+                <p><input type="password" name="pwd2" placeholder="password2"></p>
+                <p><input type="text" name="displayName" placeholder="displayName"></p>
+                <p><input type="submit" value="Register"></p>
             </form>`    
             );
             response.writeHead(200);
             response.end(html);
-        });
     });
-
-    router.post('/create' , (request,response)=>{
+   
+    router.post('/register', (request,response,next)=>{
         const post = request.body;
-        const title = post.title;
-        const description = post.description;
-        fs.writeFile(`./data/${title}`,description,'utf-8',err=>{
-            response.writeHead(302,{Location:`/topic/${title}`});
-            response.end();
-        });
-    });
-
-    router.get('/update/:pageId',(request,response)=>{
-        fs.readdir('./data',(err,filelist)=>{
-            const filtered = path.parse(request.params.pageId).base;
-            fs.readFile(`./data/${filtered}`,'utf-8',(err,description)=>{
-                const title = 'Update';
-                const list = template.list(filelist);
-                const html = template.html(title,'',list,
-                `<form action="/topic/update" method="post">
-                    <input type="hidden" name="id" value="${filtered}">
-                    <p><input type="text" name="title" placeholder="title" value="${filtered}"></p>
-                    <p><textarea name="description" placeholder="description">${description}</textarea></p>
-                    <p><input type="submit" value="create"></p>
-                </form>`    
-                );
-                response.writeHead(200);
-                response.end(html);
+        const email = post.email;
+        const pwd = post.pwd;
+        const pwd2 = post.pwd2;
+        const displayName = post.displayName;
+        if(pwd !== pwd2){
+            request.flash('error', 'pwd is not same');
+            response.redirect('/auth/register');
+            return false;
+        } else {
+            bcrypt.hash(pwd, 1, (err,hash)=>{
+                const user = {
+                    id:shortid.generate(),
+                    email:email,
+                    pwd : hash,
+                    displayName:displayName
+                }
+                db.get('users').push(user).write();
+                request.login(user, err=>{
+                    if(err){
+                        next(err);
+                    }
+                    response.redirect('/');
+                });
             });
-        });
+        }
     });
 
-    router.post('/update' , (request,response)=>{
-        const post = request.body;
-        const id = post.id;
-        const title = post.title;
-        const description = post.description;
-        fs.rename(`./data/${id}`,`./dtaa/${title}`,err=>{
-            fs.writeFile(`./data/${title}`,description,'utf-8',(err,result)=>{
-                response.writeHead(302,{Location:`/topic/${title}`});
-                response.end();
-            });
-            
-        });
-    });
-
-    router.post('/delete' , (request,response)=>{
-        const post = request.body;
-        const id = post.id;
-        fs.unlink(`./data/${id}`,err=>{
-            response.writeHead(302,{Location:`/`});
-            response.end();
-        });
-    });
-
-    router.get('/:pageId', (request,response)=>{
-        fs.readdir('./data',(err,filelist)=>{
-            const filtered = path.parse(request.params.pageId).base;
-            fs.readFile(`./data/${filtered}`,'utf-8',(err,description)=>{
-                // const queryData = url.parse(request.url,true).query;
-                const title = filtered;
-                const list = template.list(filelist);
-                const html = template.html(title,description,list,
-                `<a href="/topic/create">CREATE</a>
-                <a href="/topic/update/${title}">UPDATE</a>
-                <form action="/topic/delete" method="post">
-                    <p><input type="hidden" name="id" value="${title}"></p>
-                    <p><input type="submit" value="delete"></p>
-                </form>
-                `  
-                );
-                response.send(html);
-            });
-        });
-    });
-    */
     return router;
 }

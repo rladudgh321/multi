@@ -4,27 +4,26 @@ const fs = require('fs');
 const path = require('path');
 const template = require('../lib/template');
 const auth = require('../lib/auth');
-
+const db = require('../lib/db');
+const shortid = require('shortid');
 
 router.get('/create', (request,response)=>{
     if(!auth.is_owener(request,response)){
         response.redirect('/');
         return false;
     }
-    fs.readdir('./data',(err,filelist)=>{
-        const title = 'Create';
-        const description = '';
-        const list = template.list(filelist);
-        const html = template.html(title,description,list,
-        `<form action="/topic/create" method="post">
-            <p><input type="text" name="title" placeholder="title"></p>
-            <p><textarea name="description" placeholder="description"></textarea></p>
-            <p><input type="submit" value="create"></p>
-        </form>`, auth.statusUI(request,response)    
-        );
-        response.writeHead(200);
-        response.end(html);
-    });
+    const title = 'Create';
+    const description = '';
+    const list = template.list(request.list);
+    const html = template.html(title,description,list,
+    `<form action="/topic/create" method="post">
+        <p><input type="text" name="title" placeholder="title"></p>
+        <p><textarea name="description" placeholder="description"></textarea></p>
+        <p><input type="submit" value="create"></p>
+    </form>`, auth.statusUI(request,response)    
+    );
+    response.writeHead(200);
+    response.end(html);
 });
 
 router.post('/create' , (request,response)=>{
@@ -33,12 +32,16 @@ router.post('/create' , (request,response)=>{
         return false;
     }
     const post = request.body;
+    const id = shortid.generate();
     const title = post.title;
-    const description = post.description;
-    fs.writeFile(`./data/${title}`,description,'utf-8',err=>{
-        response.writeHead(302,{Location:`/topic/${title}`});
-        response.end();
-    });
+    const description = post.description;   
+    db.get('topics').push({
+        id:id,
+        title:title,
+        description:description,
+        user_id:request.user.id
+    }).write();
+    response.redirect(`/topic/${id}`);
 });
 
 router.get('/update/:pageId',(request,response)=>{
@@ -46,23 +49,23 @@ router.get('/update/:pageId',(request,response)=>{
         response.redirect('/');
         return false;
     }
-    fs.readdir('./data',(err,filelist)=>{
-        const filtered = path.parse(request.params.pageId).base;
-        fs.readFile(`./data/${filtered}`,'utf-8',(err,description)=>{
-            const title = 'Update';
-            const list = template.list(filelist);
-            const html = template.html(title,'',list,
-            `<form action="/topic/update" method="post">
-                <input type="hidden" name="id" value="${filtered}">
-                <p><input type="text" name="title" placeholder="title" value="${filtered}"></p>
-                <p><textarea name="description" placeholder="description">${description}</textarea></p>
-                <p><input type="submit" value="create"></p>
-            </form>`, auth.statusUI(request,response)   
-            );
-            response.writeHead(200);
-            response.end(html);
-        });
-    });
+        const topic = db.get('topics').find({id:request.params.pageId}).value();
+        if(topic.user_id !== request.user.id){
+            request.flash('error', 'not yours!');
+            return response.redirect('/');
+        }
+        const title = 'Update';
+        const list = template.list(request.list);
+        const html = template.html(title,'',list,
+        `<form action="/topic/update" method="post">
+            <input type="hidden" name="id" value="${topic.id}">
+            <p><input type="text" name="title" placeholder="title" value="${topic.title}"></p>
+            <p><textarea name="description" placeholder="description">${topic.description}</textarea></p>
+            <p><input type="submit" value="update"></p>
+        </form>`, auth.statusUI(request,response)   
+        );
+        response.writeHead(200);
+        response.end(html);
 });
 
 router.post('/update' , (request,response)=>{
@@ -71,16 +74,20 @@ router.post('/update' , (request,response)=>{
         return false;
     }
     const post = request.body;
+    console.log("post",post);
     const id = post.id;
     const title = post.title;
     const description = post.description;
-    fs.rename(`./data/${id}`,`./dtaa/${title}`,err=>{
-        fs.writeFile(`./data/${title}`,description,'utf-8',(err,result)=>{
-            response.writeHead(302,{Location:`/topic/${title}`});
-            response.end();
-        });
-        
-    });
+    const topic = db.get('topics').find({id:id}).value();
+    if(topic.user_id !== request.user.id){
+        request.flash('error', 'not yours!');
+        return response.redirect('/');
+    }
+    db.get('topics').find({id:id}).assign({
+        title:title,
+        description:description
+    }).write();
+    response.redirect(`/topic/${topic.id}`);
 });
 
 router.post('/delete' , (request,response)=>{
@@ -90,35 +97,30 @@ router.post('/delete' , (request,response)=>{
     }
     const post = request.body;
     const id = post.id;
-    fs.unlink(`./data/${id}`,err=>{
-        response.writeHead(302,{Location:`/`});
-        response.end();
-    });
+    const topic = db.get('topics').find({id:id}).value();
+    if(topic.user_id !== request.user.id){
+        request.flash('error', 'not yours!');
+        return response.redirect('/');
+    }
+    db.get('topics').remove({id:id}).write();
+    response.redirect('/');
 });
 
 router.get('/:pageId', (request,response,next)=>{
-    fs.readdir('./data',(err,filelist)=>{
-        const filtered = path.parse(request.params.pageId).base;
-        fs.readFile(`./data/${filtered}`,'utf-8',(err,description)=>{
-            if(err){
-                next(err);
-            } else {
-                // const queryData = url.parse(request.url,true).query;
-                const title = filtered;
-                const list = template.list(filelist);
-                const html = template.html(title,description,list,
-                `<a href="/topic/create">CREATE</a>
-                <a href="/topic/update/${title}">UPDATE</a>
-                <form action="/topic/delete" method="post">
-                    <p><input type="hidden" name="id" value="${title}"></p>
-                    <p><input type="submit" value="delete"></p>
-                </form>
-                `, auth.statusUI(request,response)
-                );
-                response.send(html);
-            }
-        });
-    });
+    const topic = db.get('topics').find({id:request.params.pageId}).value();
+    console.log("topic", topic);
+    // const queryData = url.parse(request.url,true).query;
+    const list = template.list(request.list);
+    const html = template.html(topic.title,topic.description,list,
+    `<a href="/topic/create">CREATE</a>
+    <a href="/topic/update/${topic.id}">UPDATE</a>
+    <form action="/topic/delete" method="post">
+        <p><input type="hidden" name="id" value="${topic.id}"></p>
+        <p><input type="submit" value="delete"></p>
+    </form>
+    `, auth.statusUI(request,response)
+    );
+    response.send(html);
 });
 
 module.exports=router;
